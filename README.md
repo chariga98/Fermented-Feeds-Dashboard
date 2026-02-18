@@ -1,245 +1,280 @@
-# Fermented Feeds Lab Analysis & Dashboard
+#  Fermented Feeds Lab Analysis
 
-This repository contains a **complete analytical pipeline and interactive dashboard** for exploring **laboratory nutrient results of fermented poultry feeds**. It integrates:
+> **R-based statistical analysis and interactive dashboard for evaluating the nutritional quality of farmer-made fermented livestock feeds** — benchmarked against commercial feeds, with regression modelling, PCA, clustering, and an AI-assisted Shiny interface.
 
-- Data cleaning & harmonization  
-- Exploratory data analysis (EDA)  
-- Automated visualization pipelines  
-- Statistical modeling & inference  
-- An interactive **Shiny dashboard with AI-assisted interpretation**
+---
 
-The project is designed to support **farmer research networks, agroecology programs, and feed optimization research** by making lab data **transparent, interpretable, and actionable**.
+##  Table of Contents
+
+- [Overview](#overview)
+- [Project Structure](#project-structure)
+- [Features](#features)
+- [Data Sources](#data-sources)
+- [Prerequisites](#prerequisites)
+- [Installation](#installation)
+- [Usage](#usage)
+- [Scripts](#scripts)
+- [Dashboard](#dashboard)
+- [Statistical Methods](#statistical-methods)
+- [Outputs](#outputs)
+
+---
+
+## Overview
+
+This project analyses laboratory results from farmer-produced fermented livestock feeds collected under the Agroecology Fund programme. It compares nutrient profiles (protein, energy, calcium, fibre, etc.) against commercial feed benchmarks, identifies what drives nutritional quality, and clusters farmers into fermentation practice typologies.
+
+**The project answers three core questions:**
+1. How does the nutritional quality of farmer-made fermented feeds compare to commercial feeds?
+2. What ingredients, batch practices, and fermentation parameters drive better nutrient outcomes?
+3. Can we identify distinct farmer typologies based on their fermentation strategies?
 
 ---
 
 ## Project Structure
 
-.
-├── app.R # Shiny interactive dashboard
-├── Farmer_data.xlsx # Farmer-level lab results
-├── Feeds_data.xlsx # Feed ingredient composition data
-├── FeedsLab Dataset.xlsx # Full analytical dataset (GO / GROW / GLOW / MISC)
-├── FermentedLabResults.xlsx # Master modeling dataset
-├── scripts/
-│ ├── nutrient_visuals.R # Automated visualization pipeline
-│ ├── nutrient_tables.R # Automated nutrient summary tables
-│ ├── modeling_pipeline.R # PCA, LASSO, Ridge, regression modeling
-│ └── data_cleaning.R # Data cleaning & harmonization
-└── README.md
-
-
----
-
-## Core Components
-
-### 1. Interactive Shiny Dashboard (`app.R`)
-
-A **fully interactive web dashboard** for:
-
-- Exploring nutrient distributions  
-- Comparing fermented vs commercial feeds  
-- Benchmarking farmer batches  
-- Visualizing ingredient patterns  
-- Statistical summaries by group  
-- AI-assisted interpretation of live data  
-
-#### Dashboard Pages
-
-| Tab | Purpose |
-|------|-----------|
-| Statistical Overview | Summary statistics & KPIs |
-| Variation Shapes | Distribution & density plots |
-| Farmer Results | Farmer benchmarking & ingredient patterns |
-| Metrics | Nutrient summary tables & averages |
-| AI Assistant | Natural language insights |
-
-#### Key Features
-
-- Multi-level filtering (organization, farmer, ingredients, batch parameters)  
-- KPI summary cards  
-- Interactive Plotly charts  
-- Password-protected data download  
-- Local AI assistant powered by **Ollama + LLaMA3**
+```
+Fermented_Lab_Analysis/
+├── analysis.R                    # Main statistical analysis (regression, PCA, clustering)
+├── regularisation.R              # LASSO & Ridge regression + PCA regression loop
+├── visualisation.R               # Automated nutrient visualization pipeline (with bounds)
+├── visualisation_basic.R         # Basic visualization pipeline (without bounds)
+├── dashboard/
+│   └── app.R                     # Shiny dashboard (interactive exploration + AI assistant)
+│
+├── Data/
+│   ├── FarmentedLabResults.xlsx  # Main lab results dataset (one row per sample)
+│   └── FeedsLab Dataset.xlsx     # Ingredient-level data (Go/Grow/Glow/Misc sheets)
+│       ├── All                   # All samples combined
+│       ├── Go                    # Energy ingredients (maize, bran, cassava, etc.)
+│       ├── Grow                  # Protein ingredients (soya, calliandra, fish meal, etc.)
+│       ├── Glow                  # Mineral/vitamin ingredients (kales, lime, eggshell, etc.)
+│       └── Misc.                 # Additives & microbes
+│
+└── outputs/
+    ├── lasso_results.csv
+    ├── ridge_results.csv
+    ├── pca_results.csv
+    ├── model_performance.csv
+    ├── Age_Effect_All_Nutrients.png
+    └── Model_Table_Farmer_Experience.png
+```
 
 ---
 
-### 2. Nutrient Visualization Pipeline
+## Features
 
-Automatically generates **distribution plots, farmer scatter plots, and ingredient scatter plots** for each nutrient across:
-
-- GO  
-- GROW  
-- GLOW  
-- MISC  
-
-#### Nutrients Analysed
-
-total_ash_dry
-fibre_dry
-crude_fat_dry
-crude_prot_dry
-non_n_free_extract_dry
-total_carb_dry
-digestible_energy_dry
-calcium_dry
-phosphorus_dry
-
-
-Each nutrient produces:
-
-- Histogram (distribution)
-- Farmer-level scatter
-- Ingredient-level scatter
-
-This enables **systematic comparison of variability and formulation strategies**.
+| Feature | Description |
+|---|---|
+|  Interactive Dashboard | Shiny app with filters for organization, farmer, ingredient, batch parameters & pH |
+|  Benchmarking | Farmer feed bars plotted against commercial feed average (red dashed line) |
+|  Nutrient Bounds | Reference ranges overlaid on all plots (gray = lower bound, red = upper bound) |
+|  AI Assistant | Local Ollama/LLaMA3 integration for natural language queries on the data |
+|  Regularised Regression | LASSO and Ridge models per nutrient, exported to CSV |
+|  PCA Analysis | Nutrient profile PCA biplot + ingredient strategy PCA |
+|  Farmer Clustering | k-means typologies by fermentation behaviour and ingredient strategy |
+|  gt Tables | Color-coded (gray/green/red) nutrient tables per organization, sorted by value |
+|  Password-Protected Download | Admin-gated data download within the dashboard |
 
 ---
 
-### 3. Automated Nutrient Tables
+## Data Sources
 
-For each nutrient, the pipeline generates **presentation-ready tables** that:
+### `FarmentedLabResults.xlsx`
+One row per feed sample. Key columns include:
 
-- Rank farmers within organizations  
-- Use consistent formatting  
-- Automatically balance layout across organizations  
+| Column Group | Variables |
+|---|---|
+| **Identifiers** | `lab_id`, `farmer_name`, `organization`, `feed_type`, `microbe_source` |
+| **Batch Parameters** | `previous_batches`, `batch_quantity_kg`, `age_of_batch_days`, `total_diversity`, `sample_p_h` |
+| **Food Group Counts** | `number_go`, `number_grow`, `number_glow`, `number_misc` |
+| **Nutrient Outcomes** | `crude_prot_dry`, `digestible_energy_dry`, `calcium_dry`, `phosphorus_dry`, `fibre_dry`, `total_ash_dry`, `crude_fat_dry`, `total_carb_dry` |
+| **Ingredient Flags** | Binary (0/1) columns from `maize` to `cowpea_leaves` |
 
-Tables display:
-
-Farmer name — nutrient value (3 decimal places)
-
-
----
-
-### 4. Statistical Modeling Pipeline
-
-This section investigates **which fermentation and batch parameters predict nutrient outcomes**.
-
-#### Predictors
-
-previous_batches
-total_diversity
-age_of_batch_days
-
-
-#### Outcomes
-
-calcium_dry
-phosphorus_dry
-total_ash_dry
-crude_prot_dry
-digestible_energy_dry
-fibre_dry
-
-
-#### Methods Applied
-
-| Method | Purpose |
-|----------|----------|
-| LASSO regression | Feature selection |
-| Ridge regression | Stable coefficient estimation |
-| PCA + Regression | Dimensionality reduction |
-| RMSE + R² | Model evaluation |
-
-#### Outputs
-
-lasso_results.csv
-ridge_results.csv
-pca_results.csv
-model_performance.csv
-
+### `FeedsLab Dataset.xlsx`
+Ingredient-level data split into four food group sheets (Go, Grow, Glow, Misc.), each with binary ingredient columns and the same 9 nutrient outcome columns.
 
 ---
 
-### 5. Data Cleaning & Harmonization
+## Nutrient Reference Ranges
 
-All datasets undergo:
+The following reference bounds are used across all plots and tables:
 
-- Standardized variable naming  
-- Explicit data type conversion  
-- Numeric sanitation (ND / NT / text → NA)  
-- Ingredient matrix validation  
-- Cross-sheet harmonization  
-
-This ensures **consistent modeling and visualization behavior** across scripts.
+| Nutrient | Lower Bound | Upper Bound |
+|---|---|---|
+| Crude Protein (%) | 15 | 24 |
+| Digestible Energy (kcal/kg) | 2700 | 3200 |
+| Calcium (%) | 0.65 | 4.5 |
+| Phosphorus (%) | 0.15 | 0.22 |
+| Total Ash (%) | 4 | 14 |
+| Fibre (%) | 2 | 10 |
+| Crude Fat (%) | 1 | 10 |
 
 ---
 
-## Installation & Setup
+## Prerequisites
 
-### 1. Install Required R Packages
+- **R** ≥ 4.1.0
+- **Ollama** (optional, for AI assistant) — install from [ollama.ai](https://ollama.ai) and run `ollama run llama3`
+
+---
+
+## Installation
+
+### 1. Clone the repository
+
+```bash
+git clone https://github.com/your-username/fermented-feeds-analysis.git
+cd fermented-feeds-analysis
+```
+
+### 2. Install R packages
 
 ```r
 install.packages(c(
-  "shiny","dplyr","ggplot2","tidyr","bslib","scales","plotly",
-  "readxl","shinyWidgets","janitor","forcats","DT","gt",
-  "glmnet","FactoMineR","factoextra","modelsummary","broom",
-  "GGally","patchwork","purrr","stringr","viridis","rollama"
+  # Core analysis
+  "tidyverse", "readxl", "janitor", "broom", "broom.mixed",
+  "lme4", "glmnet", "FactoMineR", "factoextra", "modelsummary",
+  "GGally", "patchwork", "viridis", "knitr",
+
+  # Dashboard
+  "shiny", "bslib", "shinyWidgets", "plotly", "DT", "scales",
+  "glue", "forcats",
+
+  # Tables
+  "gt", "gtExtras",
+
+  # AI assistant (optional)
+  "rollama"
 ))
-2. (Optional) Enable Local AI Assistant
-Install Ollama and pull the LLaMA3 model:
+```
 
-ollama pull llama3
-Run:
+### 3. Configure data paths
 
+Update the file paths at the top of each script:
+
+```r
+# analysis.R / regularisation.R
+path <- "Data/FarmentedLabResults.xlsx"
+
+# visualisation.R / dashboard/app.R
+path_1 <- "Data/FeedsLab Dataset.xlsx"
+
+# dashboard/app.R
+Farmer_raw <- read_excel("Data/Farmer_data.xlsx")
+Feeds_raw  <- read_excel("Data/Feeds_data.xlsx")
+```
+
+---
+
+## Usage
+
+### Run the Shiny Dashboard
+
+```r
+shiny::runApp("dashboard/app.R")
+```
+
+### Run the Statistical Analysis
+
+```r
+source("analysis.R")        # Mixed models, PCA, clustering, age-effect plots
+source("regularisation.R")  # LASSO, Ridge, PCA regression — exports CSVs
+```
+
+### Run the Visualization Pipeline
+
+```r
+source("visualisation.R")   # Full pipeline with nutrient reference bounds
+```
+
+---
+
+## Scripts
+
+### `analysis.R` — Core Statistical Analysis
+
+- **Exploratory plots**: histograms of all nutrient outcomes; correlation matrix (`GGally::ggpairs`)
+- **OLS regression**: effect of farmer experience (`previous_batches`), ingredient diversity, and batch age on each nutrient
+- **Mixed-effects models** (`lmer`): effect of food group counts, batch quantity, and microbe source on nutrients, with organization as a random effect
+- **Age effect plots**: LOESS-smoothed nutrient trajectories over batch age, colored by ingredient diversity tier (< 10, 10–18, ≥ 19)
+- **Nutrient PCA**: biplot of nutrient profiles across fermented feed samples
+- **Ingredient strategy clustering**: k-means (k=3) on ingredient PCA components
+- **Farmer typology clustering**: k-means (k=3) on fermentation behaviour variables
+
+### `regularisation.R` — Penalised Regression Loop
+
+Runs automatically across all 6 nutrients:
+
+1. **LASSO** (`alpha = 1`): feature selection via cross-validated lambda
+2. **Ridge** (`alpha = 0`): coefficient shrinkage, retains all predictors
+3. **PCR** (PCA Regression): regresses nutrients on first 2 principal components
+4. **Model performance table**: R², Adjusted R², RMSE per nutrient
+
+### `visualisation.R` — Automated Plot Pipeline
+
+For each nutrient, generates 6 plots per iteration:
+- Distribution histogram (with reference bound lines)
+- Farmer-level scatter (Lab ID × nutrient, colored by organization)
+- Material scatter for Go, Grow, Glow, and Misc ingredients
+
+### `dashboard/app.R` — Interactive Shiny App
+
+See [Dashboard](#dashboard) section below.
+
+---
+
+## Dashboard
+
+### Sidebar Filters
+- **Metric selector**: choose which nutrient to analyze
+- **Organization / Farmer / Ingredient** multi-select filters
+- **Batch parameter sliders**: previous batches, quantity (kg), age (days), diversity, pH
+- **Password-protected download** of filtered data
+
+### Tabs
+
+| Tab | Content |
+|---|---|
+| **Statistical Overview** | KPI boxes (total samples, commercial count, fermented count, avg pH), summary stats tables by feed type and sample type (mean, median, SD, CV%), AI assistant |
+| **Variation Shapes** | Density plots split by analysis group (Abaniibi A/B, Witharaga, Individual) and combined by feed type |
+| **Farmer Results** | Benchmarking bar chart vs. commercial average (red line) + most common ingredients bar |
+| **Metrics** | Full DT table of all 13 metrics with stats; average nutrient levels bar chart |
+
+### AI Assistant
+The dashboard includes a local AI assistant powered by **Ollama (LLaMA3)**. It receives a data context summary (sample count, current metric, average value, top ingredient) and answers natural language questions. Requires Ollama running locally:
+
+```bash
 ollama run llama3
-The dashboard automatically connects using the rollama R package.
+```
 
-3. Run Dashboard
-shiny::runApp("app.R")
-Data Requirements
-Farmer_data.xlsx
-Must contain:
+---
 
-Category	Example Columns
-Identifiers	lab_id, farmer_name, organization
-Batch	previous_batches, batch_quantity_kg
-Fermentation	age_of_batch_days, sample_p_h
-Nutrients	protein, energy, minerals, fibre
-Feed Type	fermented, commercial
-Feeds_data.xlsx
-Column	Description
-lab_id	Sample identifier
-feed_ingredient	Ingredient used
-FeedsLab Dataset.xlsx
-Must include sheets:
+## Statistical Methods
 
-All
-Go
-Grow
-Glow
-Misc.
-Each representing feed ingredient categories.
+| Method | Purpose | Script |
+|---|---|---|
+| OLS Linear Regression | Effect of experience & batch parameters on nutrients | `analysis.R` |
+| Linear Mixed Models (`lmer`) | Organization as random effect, ingredient counts as fixed | `analysis.R` |
+| LASSO Regression | Feature selection across nutrients | `regularisation.R` |
+| Ridge Regression | Coefficient shrinkage across nutrients | `regularisation.R` |
+| PCA Regression (PCR) | Dimensionality reduction before regression | `regularisation.R` |
+| PCA Biplot | Nutrient profile structure | `analysis.R` |
+| k-means Clustering | Ingredient strategy + farmer typologies | `analysis.R` |
 
-Analytical Questions Addressed
-How does fermented feed quality compare to commercial feed?
+---
 
-Which ingredients produce the best nutrient profiles?
+## Outputs
 
-How consistent are farmers’ fermentation processes?
+| File | Description |
+|---|---|
+| `lasso_results.csv` | LASSO coefficients per nutrient |
+| `ridge_results.csv` | Ridge coefficients per nutrient |
+| `pca_results.csv` | PCR coefficients (PC1, PC2) per nutrient |
+| `model_performance.csv` | R², Adj R², RMSE per nutrient |
+| `Age_Effect_All_Nutrients.png` | 2×3 panel of age-effect LOESS plots |
+| `Model_Table_Farmer_Experience.png` | OLS regression table (modelsummary) |
 
-Which batch parameters predict feed quality?
+---
 
-How does ingredient diversity influence protein and energy levels?
-
-Intended Users
-Agroecology researchers
-
-Farmer research networks
-
-Feed formulation specialists
-
-Extension & advisory teams
-
-Agricultural impact programs
-
-**#Author & Project Context**
-Developed for applied research on fermented poultry feeds, supporting:
-
-Farmer-led experimentation
-
-Participatory research networks
-
-Agroecological transitions
-
-Evidence-based feed formulation
-
+*Source: Fermented Feeds Laboratory Evaluation Data (Agroecology Fund Project)*
