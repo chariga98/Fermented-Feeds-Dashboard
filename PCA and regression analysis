@@ -1,0 +1,124 @@
+# ===============================
+# STEP 0 — Load Libraries
+# ===============================
+# Install if not already installed
+if(!require(glmnet)) install.packages("glmnet")
+if(!require(FactoMineR)) install.packages("FactoMineR")
+if(!require(factoextra)) install.packages("factoextra")
+if(!require(knitr)) install.packages("knitr")
+if(!require(tidyverse)) install.packages("tidyverse")
+
+# Load libraries
+library(tidyverse)
+library(glmnet)
+library(FactoMineR)
+library(factoextra)
+library(knitr)
+
+# ===============================
+# STEP 1 — Define Nutrients & Predictors
+# ===============================
+nutrients <- c("calcium_dry", "phosphorus_dry", "total_ash_dry",
+               "crude_prot_dry", "digestible_energy_dry", "fibre_dry")
+
+predictors <- c("previous_batches", "total_diversity", "age_of_batch_days")
+
+# ===============================
+# STEP 2 — Build Predictor Matrix
+# ===============================
+X <- model.matrix(as.formula(
+  paste("~", paste(predictors, collapse = " + "))
+), df)[,-1]  # remove intercept
+
+X_scaled <- scale(X)  # standardize predictors
+
+# ===============================
+# STEP 3 — Create Output Containers
+# ===============================
+lasso_results <- list()
+ridge_results <- list()
+pca_results   <- list()
+model_summary <- list()
+
+# ===============================
+# STEP 4 — FULL ANALYSIS LOOP
+# ===============================
+set.seed(123)
+
+for(n in nutrients){
+  
+  y <- df[[n]]
+  
+  # =======================
+  # LASSO
+  # =======================
+  cv_lasso <- cv.glmnet(X_scaled, y, alpha = 1)
+  
+  # Convert sparse matrix to tidy dataframe
+  lasso_coef <- coef(cv_lasso, s = "lambda.min") %>%
+    as.matrix() %>%
+    as.data.frame() %>%
+    rownames_to_column(var = "term") %>%
+    rename(estimate = `1`) %>%
+    filter(term != "(Intercept)")
+  
+  lasso_results[[n]] <- lasso_coef
+  
+  # =======================
+  # RIDGE
+  # =======================
+  cv_ridge <- cv.glmnet(X_scaled, y, alpha = 0)
+  
+  ridge_coef <- coef(cv_ridge, s = "lambda.min") %>%
+    as.matrix() %>%
+    as.data.frame() %>%
+    rownames_to_column(var = "term") %>%
+    rename(estimate = `1`) %>%
+    filter(term != "(Intercept)")
+  
+  ridge_results[[n]] <- ridge_coef
+  
+  # =======================
+  # PCA + Regression
+  # =======================
+  pca <- PCA(X_scaled, graph = FALSE)
+  pcs <- as.data.frame(pca$ind$coord[,1:2])  # use first 2 PCs
+  
+  pcr <- lm(y ~ PC1 + PC2, data = pcs)
+  
+  pca_results[[n]] <- broom::tidy(pcr)
+  
+  # =======================
+  # Model Performance
+  # =======================
+  model_summary[[n]] <- tibble(
+    Nutrient = n,
+    R2 = summary(pcr)$r.squared,
+    Adj_R2 = summary(pcr)$adj.r.squared,
+    RMSE = sqrt(mean(residuals(pcr)^2))
+  )
+}
+
+# ===============================
+# STEP 5 — Combine Output Tables
+# ===============================
+lasso_table <- bind_rows(lasso_results, .id = "Nutrient")
+ridge_table <- bind_rows(ridge_results, .id = "Nutrient")
+pca_table   <- bind_rows(pca_results,   .id = "Nutrient")
+summary_tbl <- bind_rows(model_summary)
+
+# ===============================
+# STEP 6 — View Clean Results
+# ===============================
+kable(lasso_table, digits = 3, caption = "LASSO Results")
+kable(ridge_table, digits = 3, caption = "Ridge Results")
+kable(pca_table,   digits = 3, caption = "PCA Regression Results")
+kable(summary_tbl, digits = 3, caption = "PCA Model Performance")
+
+# ===============================
+# STEP 7 — Export Tables for Report
+# ===============================
+write.csv(lasso_table, "lasso_results.csv", row.names = FALSE)
+write.csv(ridge_table, "ridge_results.csv", row.names = FALSE)
+write.csv(pca_table,   "pca_results.csv",   row.names = FALSE)
+write.csv(summary_tbl,"model_performance.csv", row.names = FALSE)
