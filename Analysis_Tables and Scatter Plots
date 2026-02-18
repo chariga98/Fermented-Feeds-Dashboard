@@ -1,0 +1,284 @@
+library(readxl)
+library(tidyverse)
+library(ggplot2)
+library(patchwork)
+library(gt)
+library(scales)
+library(glue)
+library(dplyr)
+library(tidyr)
+library(purrr)
+library(stringr)
+library(janitor)
+
+path_1 <- "C:/Users/okoth/OneDrive/Desktop/Fermented_Lab/Fermented_Lab_Analysis/FeedsLab Dataset.xlsx"
+
+All  <- read_excel(path_1,"All")
+Go   <- read_excel(path_1, "Go")
+Grow <- read_excel(path_1,"Grow")
+Glow <- read_excel(path_1,"Glow")
+Misc <- read_excel(path_1,"Misc.")
+
+#-----------GO DATA TYPES-------------------------------------------------------------------------------------------------
+Go <- Go %>%
+  clean_names() %>%
+  mutate(
+    across(c(farmer_name, organization), as.factor),
+    lab_id = as.character(lab_id),
+    across(
+      c(maize, rotten_maize, maize_bran, maize_germ, wheat_bran, rice_bran, rice_grain,
+        green_banana, cassava, sweet_potatoes, millet, arrow_roots),
+      as.integer
+    ),
+    across(
+      c("total_ash_dry","fibre_dry","crude_fat_dry","crude_prot_dry","non_n_free_extract_dry",
+        "total_carb_dry","digestible_energy_dry","calcium_dry","phosphorus_dry"),
+      as.numeric
+    )
+  )
+
+#---------GROW DATA TYPES--------------------------------------------------------------------------------------------------------------------
+Grow <- Grow %>%
+  clean_names() %>%
+  mutate(
+    across(c(farmer_name, organization), as.factor),
+    lab_id = as.character(lab_id),
+    across(
+      c("soya","sesbania","calliandra","lucaena","azolla","desmodium","gliricidia",
+        "trichantera","sunflowercakes","beans","fish_meal","cotton_seed_cake","mucuna",
+        "lablab","cowpea","moringa"),
+      as.integer
+    ),
+    across(
+      c("total_ash_dry","fibre_dry","crude_fat_dry","crude_prot_dry","non_n_free_extract_dry",
+        "total_carb_dry","digestible_energy_dry","calcium_dry","phosphorus_dry"),
+      as.numeric
+    )
+  )
+
+#---------GLOW DATA TYPES--------------------------------------------------------------------------------------------------------------------------
+Glow <- Glow %>%
+  clean_names() %>%
+  mutate(
+    across(c("farmer_name", "organization"), as.factor),
+    lab_id = as.character(lab_id),
+    across(
+      c("kales","cabbage","sea_salt","table_salt","dcp","lime","animal_bones","pumpkin_leaves","pawpaw",
+        "banana","spinach","guavas","oranges","mangoes","tomatoes","egg_shell","water_melon",
+        "layers_premix","pineaple","jack_fruit","molases","sugar","honey","jaggery","sweet_potatoe_vine",
+        "banana_stem_leaves","microbes","cassava_leaves_tubers","black_jack","pigweed_amaranth",
+        "arrow_roots_leaves","nepier","russian_comfrey","gallant_soldiers","weeds","water","dairy_meal",
+        "toxin_binder","star_grass","couch_grass","cooking_oil","avocado","crotolaria","cowpea_leaves"),
+      as.integer
+    ),
+    across(
+      c("total_ash_dry",
+        "fibre_dry",
+        "crude_fat_dry",
+        "crude_prot_dry",
+        "non_n_free_extract_dry",
+        "total_carb_dry",
+        "digestible_energy_dry",
+        "calcium_dry",
+        "phosphorus_dry"),
+      as.numeric
+    )
+  )
+
+#---------MISC. DATA TYPES--------------------------------------------------------------------------------------------------------------------------------------------------
+Misc <- Misc %>%
+  clean_names() %>%
+  mutate(
+    across(c("farmer_name", "organization"), as.factor),
+    lab_id = as.character(lab_id),
+    across(
+      c("molases","sugar","honey","jaggery","sweet_potatoe_vine","banana_stem_leaves","microbes",
+        "cassava_leaves_tubers","black_jack","pigweed_amaranth","arrow_roots_leaves","nepier",
+        "russian_comfrey","gallant_soldiers","weeds","water","dairy_meal","toxin_binder","star_grass",
+        "couch_grass","cooking_oil","avocado","crotolaria","cowpea_leaves"),
+      as.integer
+    ),
+    across(
+      c("total_ash_dry","fibre_dry","crude_fat_dry","crude_prot_dry","non_n_free_extract_dry",
+        "total_carb_dry","digestible_energy_dry","calcium_dry","phosphorus_dry"),
+      as.numeric
+    )
+  )
+
+#### NUTRIENTS VECTOR #########################################################
+Nutrients <- c("total_ash_dry","fibre_dry","crude_fat_dry","crude_prot_dry",
+               "non_n_free_extract_dry","total_carb_dry","digestible_energy_dry",
+               "calcium_dry","phosphorus_dry")
+
+###############################################################################
+# --------------------------- NUTRIENT BOUNDS ---------------------------------
+###############################################################################
+
+nutrient_bounds <- list(
+  total_ash_dry          = list(lower = 4,   upper = 14),
+  fibre_dry              = list(lower = 2,   upper = 10),
+  crude_fat_dry          = list(lower = 1,   upper = 10),
+  crude_prot_dry         = list(lower = 15,  upper = 24),
+  non_n_free_extract_dry = list(lower = 2,   upper = NA),
+  total_carb_dry         = list(lower = NA,  upper = NA),
+  digestible_energy_dry  = list(lower = 2700,upper = 3200),
+  calcium_dry            = list(lower = 0.65,upper = 4.5),
+  phosphorus_dry         = list(lower = 0.15, upper = 0.22)
+)
+
+###############################################################################
+# --------------------------- PLOT FUNCTIONS ----------------------------------
+###############################################################################
+
+org_palette <- c("#1F4BD8","#000001","#009E73","#FFED29","#ED2100")
+
+# Distribution ----------------------------------------------------
+plot_distribution <- function(df, nutrient) {
+  bounds <- nutrient_bounds[[nutrient]]
+  p <- ggplot(df, aes(x = .data[[nutrient]])) +
+    geom_histogram(bins = 25, fill = "#1F4BD8", alpha = 0.85, color = "white") +
+    theme_minimal(base_size = 14) +
+    labs(title = glue("Distribution of {nutrient}"), x = nutrient, y = "Frequency")
+  if (!is.na(bounds$lower)) p <- p + geom_vline(xintercept = bounds$lower, linetype="dotted", color="gray", linewidth=1)
+  if (!is.na(bounds$upper)) p <- p + geom_vline(xintercept = bounds$upper, linetype="dotted", color="red", linewidth=1)
+  p
+}
+
+# Farmer Scatter --------------------------------------------------
+plot_farmer_scatter <- function(df, nutrient) {
+  bounds <- nutrient_bounds[[nutrient]]
+  p <- ggplot(df, aes(x=factor(lab_id), y=.data[[nutrient]], color=organization)) +
+    geom_point(size=2.8, alpha=0.85) +
+    scale_color_manual(values=rep(org_palette, length.out=nlevels(df$organization))) +
+    theme_minimal(base_size=13) +
+    labs(title=glue("{nutrient}: Farmer-level Variation"), x="Farmer ID", y=nutrient, color="Organization") +
+    theme(axis.text.x=element_text(angle=90, vjust=0.5, hjust=1))
+  if (!is.na(bounds$lower)) p <- p + geom_hline(yintercept=bounds$lower, linetype="dotted", color="gray", linewidth=1)
+  if (!is.na(bounds$upper)) p <- p + geom_hline(yintercept=bounds$upper, linetype="dotted", color="red", linewidth=1)
+  p
+}
+
+# Material Scatter ------------------------------------------------
+plot_material_scatter <- function(df, nutrient, title) {
+  bounds <- nutrient_bounds[[nutrient]]
+  p <- df %>%
+    select(lab_id, organization, all_of(nutrient), where(is.integer)) %>%
+    pivot_longer(-c(lab_id, organization, all_of(nutrient)), names_to="material", values_to="present") %>%
+    filter(present==1) %>%
+    ggplot(aes(material, .data[[nutrient]], color=organization)) +
+    geom_jitter(width=0.25, size=2.6, alpha=0.8) +
+    scale_color_manual(values=rep(org_palette, length.out=nlevels(df$organization))) +
+    theme_minimal(base_size=13) +
+    labs(title=glue("{title}: {nutrient}"), x="Feed Material", y=nutrient, color="Organization") +
+    theme(axis.text.x=element_text(angle=45, hjust=1))
+  if (!is.na(bounds$lower)) p <- p + geom_hline(yintercept=bounds$lower, linetype="dotted", color="gray", linewidth=1)
+  if (!is.na(bounds$upper)) p <- p + geom_hline(yintercept=bounds$upper, linetype="dotted", color="red", linewidth=1)
+  p
+}
+
+###############################################################################
+# ---------------------- FULL AUTOMATED VISUAL PIPELINE -----------------------
+###############################################################################
+
+for (nutrient in Nutrients) {
+  cat("\n============================\n")
+  cat("NUTRIENT:", nutrient, "\n")
+  cat("============================\n")
+  
+  # Distribution with bounds
+  print(plot_distribution(Go, nutrient))
+  
+  # Farmer scatter with bounds
+  print(plot_farmer_scatter(Go, nutrient))
+  
+  # Material scatters with bounds
+  print(plot_material_scatter(Go,   nutrient, "GO Materials"))
+  print(plot_material_scatter(Grow, nutrient, "GROW Materials"))
+  print(plot_material_scatter(Glow, nutrient, "GLOW Materials"))
+  print(plot_material_scatter(Misc, nutrient, "MISC Materials"))
+}
+
+##################################
+#___------TABLE--------------------
+##################################
+
+##################################
+#___------TABLE--------------------
+##################################
+
+create_nutrient_table <- function(df, nutrient) {
+  bounds <- nutrient_bounds[[nutrient]]
+  
+  table_data <- df %>%
+    select(organization, farmer_name, all_of(nutrient)) %>%
+    arrange(organization, !!sym(nutrient)) %>%
+    group_by(organization) %>%
+    mutate(rank = row_number()) %>%
+    ungroup() %>%
+    mutate(
+      value_str = ifelse(is.na(!!sym(nutrient)), "-", sprintf("%.3f", !!sym(nutrient))),
+      farmer_val = paste0(farmer_name, " — ", value_str)
+    )
+  
+  orgs <- sort(unique(table_data$organization))
+  half <- ceiling(length(orgs) / 2)
+  left_orgs <- orgs[1:half]
+  right_orgs <- orgs[(half + 1):length(orgs)]
+  
+  make_wide <- function(org_block) {
+    table_data %>%
+      filter(organization %in% org_block) %>%
+      select(organization, rank, farmer_val) %>%
+      pivot_wider(names_from = organization, values_from = farmer_val)
+  }
+  
+  left_wide  <- make_wide(left_orgs)
+  right_wide <- make_wide(right_orgs)
+  
+  final_table <- left_join(left_wide, right_wide, by = "rank") %>% select(-rank)
+  final_table <- final_table %>% mutate(across(everything(), ~replace_na(., "-")))
+  
+  gt(final_table) %>%
+    tab_header(
+      title = paste0(str_to_title(str_replace_all(nutrient, "_", " ")), " by Organization"),
+      subtitle = "Sorted within organization"
+    ) %>%
+    cols_align(align = "center", everything()) %>%
+    tab_options(
+      table.font.size = 12,
+      data_row.padding = px(2),
+      table.border.top.color = "black",
+      table.border.bottom.color = "black"
+    ) %>%
+    data_color(
+      columns = everything(),
+      fn = function(x) {
+        vals <- suppressWarnings(as.numeric(str_extract(x, "-?\\d+\\.?\\d*")))
+        ifelse(is.na(vals), "white",
+               ifelse(!is.na(bounds$lower) & vals < bounds$lower, "gray",
+                      ifelse(!is.na(bounds$upper) & vals > bounds$upper, "red", "green")
+               )
+        )
+      }
+    ) %>%
+    tab_source_note(
+      source_note = md("**Legend:** Gray = Below permissible range | Green = Within range | Red = Above permissible range")
+    )
+}
+
+# -----------------------------
+# Apply for all nutrients
+# -----------------------------
+nutrient_tables <- map(Nutrients, ~ create_nutrient_table(Go, .x))
+
+# Display first few tables as examples
+nutrient_tables[[1]]
+nutrient_tables[[2]]
+nutrient_tables[[3]]
+nutrient_tables[[4]]
+nutrient_tables[[5]]
+nutrient_tables[[6]]
+nutrient_tables[[7]]
+nutrient_tables[[8]]
+nutrient_tables[[9]]
+
