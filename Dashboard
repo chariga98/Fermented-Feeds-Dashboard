@@ -1,0 +1,399 @@
+# -----------------------------
+# 1. INSTALL & LOAD PACKAGES
+# -----------------------------
+required_packages <- c(
+  "shiny","dplyr","ggplot2","tidyr","bslib","scales","plotly","readxl",
+  "shinyWidgets","janitor","forcats","DT","rollama"
+)
+for(p in required_packages){ 
+  if(!require(p, character.only = TRUE)) install.packages(p, repos = "https://cloud.r-project.org")
+  library(p, character.only = TRUE)
+}
+library(shiny)
+library(ggplot2)
+library(bslib)
+library(gt)
+
+
+#install.packages("rollama")
+#library(rollama)
+# -----------------------------
+# 2. DATA IMPORT & CLEANING
+# -----------------------------
+Farmer_raw <- read_excel("Farmer_data.xlsx", .name_repair = "unique") %>% clean_names()
+Feeds_raw  <- read_excel("Feeds_data.xlsx") %>% clean_names()
+
+get_mode <- function(v) {
+  uniqv <- unique(na.omit(v))
+  if(length(uniqv)==0) return(NA)
+  uniqv[which.max(tabulate(match(v, uniqv)))]
+}
+
+clean_numeric <- function(x) {
+  x <- as.character(x); x <- gsub("[<>]", "", x)
+  x <- gsub("ND|NT|N/A|NA|na", "", x, ignore.case=TRUE)
+  as.numeric(x)
+}
+
+Farmer_raw <- Farmer_raw %>% 
+  mutate(
+    lab_id = as.character(lab_id),
+    feed_type = tolower(trimws(feed_type)), 
+    sample_type = trimws(sample_type),
+    farmer_name = trimws(farmer_name),
+    organization = trimws(organization)
+  )
+
+Feeds_raw <- Feeds_raw %>% mutate(lab_id = as.character(lab_id))
+
+my_metrics <- c("percent_moisture_wet", "percent_dry_matter_wet", "total_ash_dry", "fibre_dry",
+                "crude_fat_dry", "crude_prot_dry", "non_n_free_extract_dry", "total_carb_dry",
+                "digestible_energy_dry", "calcium_dry", "phosphorus_dry", "tannins_dry", "fumonisins_dry")
+
+plot_metrics <- c("percent_moisture_wet", "percent_dry_matter_wet", "total_ash_dry", "fibre_dry",
+                  "crude_fat_dry", "crude_prot_dry", "non_n_free_extract_dry", "total_carb_dry",
+                  "calcium_dry", "phosphorus_dry")
+
+meta_cols <- c("previous_batches", "batch_quantity_kg", "age_of_batch_days", "total_diversity" ,"sample_p_h")
+
+Farmer_raw <- Farmer_raw %>% 
+  mutate(across(any_of(my_metrics), clean_numeric)) %>%
+  mutate(across(any_of(meta_cols), clean_numeric))
+
+# -----------------------------
+# 3. ANALYSIS GROUPS
+# -----------------------------
+Farmer_Unique <- Farmer_raw %>%
+  mutate(
+    analysis_group = case_when(
+      feed_type == "commercial" ~ "Commercial",
+      grepl("Abaniibi A", sample_type, ignore.case=T) ~ "Abaniibi A",
+      grepl("Abaniibi B", sample_type, ignore.case=T) ~ "Abaniibi B",
+      grepl("Witharaga", sample_type, ignore.case=T) ~ "Witharaga",
+      grepl("Individual", sample_type, ignore.case=T) ~ "Individual Sample",
+      TRUE ~ "Other"
+    )
+  ) %>%
+  distinct(lab_id, .keep_all = TRUE) 
+
+Joined_Data <- Farmer_Unique %>% left_join(Feeds_raw, by = "lab_id")
+
+# Calculation for Sliders
+safe_max <- function(x, default) {
+  val <- max(x, na.rm = TRUE); if(!is.finite(val)) return(default); return(val)
+}
+max_batches <- safe_max(Farmer_Unique$previous_batches, 10)
+max_qty     <- safe_max(Farmer_Unique$batch_quantity_kg, 100)
+max_age     <- safe_max(Farmer_Unique$age_of_batch_days, 30)
+max_ph      <- safe_max(Farmer_Unique$sample_p_h, 14)
+max_div      <- safe_max(Farmer_Unique$total_diversity, 50)
+# -----------------------------
+# 4. UI DESIGN
+# -----------------------------
+ui <- fluidPage(
+  theme = bslib::bs_theme(bootswatch = "flatly"),
+  titlePanel("Fermented Feeds Lab Results Dashboard"),
+  
+  tags$head(
+    tags$style(HTML("
+      .kpi-box { color: white; padding: 15px; border-radius: 5px; text-align: center; margin-bottom: 10px; }
+      .kpi-total { background-color: #2c3e50; }
+      .kpi-comm { background-color: #34495e; }
+      .kpi-ferm { background-color: #e67e22; }
+      .kpi-ph { background-color: #16a085; }
+    "))
+  ),
+  
+  sidebarLayout(
+    sidebarPanel(
+      width = 3,
+      h4("Filters"),
+      selectizeInput("metric", "Select Lab Metric", choices = my_metrics, selected = "crude_prot_dry"),
+      selectizeInput("org", "Organization", choices = c("All", sort(unique(Farmer_Unique$organization))), selected="All", multiple=TRUE),
+      selectizeInput("farmer", "Farmer Name", choices = c("All", sort(unique(Farmer_Unique$farmer_name))), selected="All", multiple=TRUE),
+      selectizeInput("ingredient", "Feed Ingredient Used", choices = c("All", sort(unique(Feeds_raw$feed_ingredient))), selected="All", multiple=TRUE),
+      hr(),
+      h4("Batch Parameters"),
+      sliderInput("batch_count", "Previous Batches", min=0, max=max_batches, value=c(0, max_batches)),
+      sliderInput("batch_qty", "Batch Quantity (kg)", min=0, max=max_qty, value=c(0, max_qty)),
+      sliderInput("diversity_total", "Feed Diversity", min=0, max=max_div, value=c(0, max_div)),
+      
+      sliderInput("batch_age", "Batch Age (Days)", min=0, max=max_age, value=c(0, max_age)),
+      sliderInput("ph_range", "Sample pH", min=0, max=ceiling(max_ph), value=c(0, ceiling(max_ph)), step=0.1),
+      hr(),
+      actionButton("btn_download_modal", "Download Data", icon=icon("lock"))
+    ),
+    
+    mainPanel(
+      tabsetPanel(
+        tabPanel("Statistical Overview",
+                 br(),
+                 wellPanel(style = "background-color: #fdfefe; border-left: 5px solid #2c3e50;",
+                           h5("💡 Key Question:"),
+                           p("How does the fermented feeds variation compares to the store-bought commercial feeds?")),
+                 fluidRow(
+                   column(3, div(class="kpi-box kpi-total", h5("Total Samples"), h3(textOutput("kpi_total")))),
+                   column(3, div(class="kpi-box kpi-comm", h5("Commercial"), h3(textOutput("kpi_comm")))),
+                   column(3, div(class="kpi-box kpi-ferm", h5("Fermented"), h3(textOutput("kpi_ferm")))),
+                   column(3, div(class="kpi-box kpi-ph", h5("Avg pH"), h3(textOutput("kpi_ph"))))
+                 ),
+                 hr(),
+                 h4("Summary: By Feed Type"),
+                 tableOutput("table_feed_type"),
+                 br(),
+                 h4("Summary: By Sample Type"),
+                 tableOutput("table_sample_type"),
+                 p(tags$small(tags$b("Note:"), "Look at the 'CV (%)' to see if different farms are producing the same quality. A lower number means the results are more consistent.")),
+          ##----------------
+          #AI ASSISTANT
+          ##----------------
+               h4("AI Assistant (Local)"),
+               textInput("user_chat", "Ask a question about this data:", placeholder = "e.g., Which group is most consistent?"),
+               actionButton("send_chat", "Query AI"),
+                 br(), br(),
+                 uiOutput("ai_response_ui")
+        ),
+        
+        tabPanel("Variation Shapes",
+                 br(),
+                 wellPanel(style = "background-color: #fdfefe; border-left: 5px solid #e67e22;",
+                           h5("💡 Key Question:"),
+                           p("Are most samples normarly distributed, or are the readings spread out too much?")),
+                 h4("Distribution Shape"),
+                 p(tags$b("Note:"), "A narrow distribution (small spread) indicates more consistent feed quality across batches, while a wider distribution indicates greater variation from batch to batch."),
+                 plotlyOutput("plot_density_split", height="400px"),
+                 hr(),
+                 plotlyOutput("plot_density_combined", height="300px")
+        ),
+        
+        tabPanel("Farmer Results",
+                 br(),
+                 wellPanel(style = "background-color: #fdfefe; border-left: 5px solid #5dade2;",
+                           h5("💡 Key Question:"),
+                           p("Which specific samples have this metric selected, and what ingredients were used to prepare them?")),
+                 fluidRow(
+                   column(7, 
+                          h4("Benchmarking (Red line = Commercial Average)"),
+                          plotlyOutput("plot_bar_bench", height="600px")),
+                   column(5, 
+                          h4("Most Common Ingredients"),
+                          plotlyOutput("plot_ingredients", height="600px"))
+                 ),
+                 p(tags$small(tags$b("Note:"), "Any bar that goes higher than the red line implies the sample exceeds the average commercial feed for this Specific metric."))
+        ),
+        
+        tabPanel("Metrices",
+                 br(),
+                 wellPanel(style = "background-color: #fdfefe; border-left: 5px solid #16a085;",
+                           h5("💡 Key Question:"),
+                           p("Which specific nutrients are in our current samples?")),
+                 h4("Full Summary of All Metrics"),
+                 DTOutput("table_all_metrics"),
+                 hr(),
+                 h4("Average Nutrient Levels"),
+                 plotlyOutput("plot_metrics_avg_bar", height="500px"),
+                 p(tags$small(tags$b("Note:"), "This table only counts samples that were actually tested. If a test wasn't done, it doesn't affect the average numbers."))
+        )
+      )
+    )
+  )
+)
+
+# -----------------------------
+# 5. SERVER LOGIC (UPDATED)
+# -----------------------------
+server <- function(input, output, session) {
+  
+  # --- DOWNLOAD LOGIC START ---
+  # 1. Show the pop-up when button is clicked
+  observeEvent(input$btn_download_modal, {
+    showModal(modalDialog(
+      title = "Restricted Data Access",
+      passwordInput("download_pass", "Enter Admin Password:", placeholder = "Contact admin for access"),
+      footer = tagList(
+        modalButton("Cancel"),
+        downloadButton("download_data_csv", "Verify & Download")
+      ),
+      easyClose = TRUE
+    ))
+  })
+  
+  # 2. Handle the actual download
+  output$download_data_csv <- downloadHandler(
+    filename = function() {
+      paste("Fermented_Feeds_Data_", Sys.Date(), ".csv", sep = "")
+    },
+    content = function(file) {
+      # Use whatever password you prefer here
+      if (input$download_pass == "admin123") {
+        removeModal() # Close the pop-up
+        write.csv(filtered_data(), file, row.names = FALSE)
+      } else {
+        showNotification("Incorrect Password. Access Denied.", type = "error")
+      }
+    }
+  )
+  # --- DOWNLOAD LOGIC END ---
+  
+  filtered_data <- reactive({
+    df_joined <- Joined_Data
+    if(!("All" %in% input$org)) df_joined <- df_joined %>% filter(organization %in% input$org)
+    if(!("All" %in% input$farmer)) df_joined <- df_joined %>% filter(farmer_name %in% input$farmer)
+    if(!("All" %in% input$ingredient)) df_joined <- df_joined %>% filter(feed_ingredient %in% input$ingredient)
+    valid_ids <- unique(df_joined$lab_id)
+    
+    Farmer_Unique %>% 
+      filter(lab_id %in% valid_ids) %>%
+      filter(
+        (is.na(previous_batches) | (previous_batches >= input$batch_count[1] & previous_batches <= input$batch_count[2])),
+        (is.na(batch_quantity_kg) | (batch_quantity_kg >= input$batch_qty[1] & batch_quantity_kg <= input$batch_qty[2])),
+        (is.na(total_diversity) | (total_diversity >= input$diversity_total[1] & total_diversity <= input$diversity_total[2])),
+        (is.na(age_of_batch_days) | (age_of_batch_days >= input$batch_age[1] & age_of_batch_days <= input$batch_age[2])),
+        (is.na(sample_p_h) | (sample_p_h >= input$ph_range[1] & sample_p_h <= input$ph_range[2]))
+      )
+  })
+  
+  output$kpi_total <- renderText({ nrow(filtered_data()) })
+  output$kpi_comm  <- renderText({ sum(filtered_data()$feed_type == "commercial", na.rm=T) })
+  output$kpi_ferm  <- renderText({ sum(filtered_data()$feed_type == "fermented", na.rm=T) })
+  output$kpi_ph    <- renderText({ 
+    ph_vals <- na.omit(filtered_data()$sample_p_h)
+    if(length(ph_vals) == 0) return("N/A"); round(mean(ph_vals), 2) 
+  })
+  
+  generate_stats <- function(df, group_col, metric) {
+    res <- df %>%
+      filter(!is.na(.data[[metric]])) %>%
+      group_by(across(all_of(group_col))) %>%
+      summarise(
+        Count = n(),
+        Mean = round(mean(.data[[metric]], na.rm=T), 2),
+        Median = round(median(.data[[metric]], na.rm=T), 2),
+        Mode = round(get_mode(.data[[metric]]), 2),
+        SD = round(sd(.data[[metric]], na.rm=T), 2),
+        Variance = round(var(.data[[metric]], na.rm=T), 2),
+        `CV (%)` = round((sd(.data[[metric]], na.rm=T) / mean(.data[[metric]], na.rm=T)) * 100, 2),
+        Range = if(n() > 0) paste(round(min(.data[[metric]]),2), "-", round(max(.data[[metric]]),2)) else "N/A",
+        IQR = round(IQR(.data[[metric]], na.rm=T), 2),
+        .groups = "drop"
+      )
+    if(nrow(res) == 0) return(data.frame(Message = "No data available"))
+    return(res)
+  }
+  
+  output$table_feed_type <- renderTable({ generate_stats(filtered_data(), "feed_type", input$metric) })
+  output$table_sample_type <- renderTable({ 
+    filtered_data() %>% filter(feed_type == "fermented") %>% generate_stats("sample_type", input$metric) 
+  })
+  
+  output$table_all_metrics <- renderDT({
+    df <- filtered_data()
+    all_stats <- lapply(my_metrics, function(m) {
+      vals <- na.omit(df[[m]])
+      if(length(vals) == 0) return(NULL)
+      data.frame(
+        Metric = gsub("_", " ", m),
+        Count = length(vals),
+        Mean = round(mean(vals), 2), Median = round(median(vals), 2),
+        Mode = round(get_mode(vals), 2), SD = round(sd(vals), 2),
+        Variance = round(var(vals), 2), `CV (%)` = round((sd(vals)/mean(vals))*100, 2),
+        Range = paste(round(min(vals),2), "-", round(max(vals),2)), IQR = round(IQR(vals), 2)
+      )
+    })
+    final_df <- do.call(rbind, all_stats)
+    validate(need(!is.null(final_df), "No data available."))
+    datatable(final_df, options = list(pageLength = 5, scrollX = TRUE), rownames = FALSE)
+  })
+  
+  output$plot_metrics_avg_bar <- renderPlotly({
+    df <- filtered_data()
+    avg_df <- df %>%
+      summarise(across(all_of(plot_metrics), \(x) mean(x, na.rm = TRUE))) %>%
+      pivot_longer(everything(), names_to = "Metric", values_to = "Average") %>%
+      mutate(Metric = gsub("_", " ", Metric))
+    p <- ggplot(avg_df, aes(x=reorder(Metric, Average), y=Average, fill=Average)) +
+      geom_col() + coord_flip() + scale_fill_gradient(low="#D1F2EB", high="#16A085") +
+      theme_minimal() + labs(x="", y="Average Value")
+    ggplotly(p)
+  })
+  
+  output$plot_density_split <- renderPlotly({
+    m <- input$metric; df <- filtered_data() %>% filter(!is.na(.data[[m]]), analysis_group != "Other")
+    validate(need(nrow(df)>2, "Insufficient data for distribution."))
+    p <- ggplot(df, aes(x=.data[[m]], fill=analysis_group, color=analysis_group)) +
+      geom_density(alpha=0.4, adjust=1.5) + scale_fill_brewer(palette = "Set2") + theme_minimal()
+    ggplotly(p)
+  })
+  
+  output$plot_density_combined <- renderPlotly({
+    m <- input$metric; df <- filtered_data() %>% filter(!is.na(.data[[m]]))
+    validate(need(nrow(df)>2, "Insufficient data."))
+    p <- ggplot(df, aes(x=.data[[m]], fill=feed_type, color=feed_type)) +
+      geom_density(alpha=0.5, adjust=1.5) +
+      scale_fill_manual(values=c("commercial"="#2C3E50", "fermented"="#E67E22")) + theme_minimal()
+    ggplotly(p)
+  })
+  
+  output$plot_bar_bench <- renderPlotly({
+    m <- input$metric; df <- filtered_data() %>% filter(!is.na(.data[[m]])) %>% arrange(desc(.data[[m]]))
+    validate(need(nrow(df)>0, "No data."))
+    comm_avg <- mean(Farmer_Unique[[m]][Farmer_Unique$feed_type == "commercial"], na.rm=T)
+    p <- ggplot(df, aes(x=reorder(lab_id, -.data[[m]]), y=.data[[m]], fill=feed_type,
+                        text=paste("Farmer:", farmer_name, "<br>Val:", .data[[m]]))) +
+      geom_col() + geom_hline(yintercept = comm_avg, linetype="dashed", color="#E74C3C", size=1) +
+      scale_fill_manual(values=c("commercial"="#2C3E50", "fermented"="#5DADE2")) + 
+      theme_minimal() + labs(x="Lab ID", y=m) +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1))
+    ggplotly(p, tooltip="text")
+  })
+  
+  output$plot_ingredients <- renderPlotly({
+    ing_counts <- Joined_Data %>% 
+      filter(lab_id %in% filtered_data()$lab_id, !is.na(feed_ingredient)) %>% count(feed_ingredient)
+    validate(need(nrow(ing_counts)>0, "No ingredient data."))
+    p <- ggplot(ing_counts, aes(x=reorder(feed_ingredient, n), y=n)) + 
+      geom_col(fill="#27AE60") + coord_flip() + theme_minimal() + labs(x="", y="Count")
+    ggplotly(p)
+  })
+  ##------------------
+  ## AI Assistant
+  ##-----------------
+  # Reactive value to store the AI's answer
+  ai_res <- reactiveVal("Waiting for your question...")
+  
+  observeEvent(input$send_chat, {
+    # 1. Create the "Context" (Feeding your dashboard data to the AI)
+   df <- filtered_data()
+    
+    # We summarize the data so the AI doesn't get overwhelmed
+    data_summary <- paste0(
+      "Context: You are an agricultural lab expert. Here is the current dashboard data summary: ",
+      "Total samples: ", nrow(df), ". ",
+      "Current Metric: ", input$metric, ". ",
+      "Avg Value: ", round(mean(df[[input$metric]], na.rm=T), 2), ". ",
+      "Most used ingredient: ", names(sort(table(Joined_Data$feed_ingredient), decreasing=TRUE)[1]), ". ",
+      "The user is asking: "
+)
+    
+    # 2. Show a 'Thinking' message
+   ai_res("AI is analyzing your local data... please wait.")
+    
+    # 3. Talk to Ollama (Local)
+    tryCatch({
+      answer <- rollama::query(paste(data_summary, input$user_chat), model = "llama3")
+     ai_res(answer$message$content)
+    }, error = function(e) {
+    ai_res("Error: Ensure Ollama is running in the background (Type 'ollama run llama3' in terminal).")
+    })
+})
+  
+ output$ai_response_ui <- renderUI({
+    wellPanel(
+      style = "background-color: #f4f6f7; border-left: 5px solid #3498db;",
+      tags$b("AI Assistant:"),
+      p(ai_res())
+   )
+ })
+}
+
+shinyApp(ui, server)
